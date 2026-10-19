@@ -1,0 +1,9 @@
+{
+  "name": "fracturelab",
+  "description": "fracturelab が公開する Claude Code 用 Skill のプラグイン集",
+  "owner": {
+    "name": "fracturelab",
+    "url": "https://fracturelab.dev"
+  },
+  "plugins": []
+}
