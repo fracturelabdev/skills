@@ -15,16 +15,34 @@ JA = re.compile(r"[぀-ヿ一-鿿]")
 # YAML のプレーンスカラーとして解釈できない先頭文字（フロー・引用・ブロック・タグなど）
 YAML_INDICATORS = set("[]{}&*!|>'\"%@`,#")
 LINE = re.compile(r"([a-z][a-z0-9_-]*): (.*)")
-# YAML（1.1 / 1.2 core）が文字列以外（真偽値・null・数値・日付）に解決するプレーンスカラー
-NON_STRING = re.compile(
-    r"(?i:y|n|yes|no|true|false|on|off|null|~)"
-    r"|[-+]?(?:0|[1-9][0-9_]*)"
-    r"|[-+]?0(?:b[01_]+|o?[0-7_]+|x[0-9a-fA-F_]+)"
-    r"|[-+]?(?:[0-9][0-9_]*)?\.[0-9_]*(?:[eE][-+]?[0-9]+)?"
-    r"|[-+]?[0-9][0-9_]*[eE][-+]?[0-9]+"
-    r"|[-+]?\.(?i:inf)|\.(?i:nan)"
-    r"|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt ].*)?"
-)
+# YAML が文字列以外に解決するプレーンスカラー。YAML 1.1（PyYAML の implicit resolver）と
+# YAML 1.2 core schema（仕様と ruamel.yaml の実装）の和集合で、どれか 1 つでも文字列に
+# ならない値を拒否する。仕様にあって実装が解決しない値（`y` `.1e7` など）も安全側で拒否する。
+NON_STRING = re.compile("|".join([
+    # bool（1.1 / 1.2）
+    r"yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF|y|Y|n|N",
+    # null・merge・value（1.1）
+    r"~|null|Null|NULL|<<|=",
+    # int（1.1: 2 / 8 / 10 / 16 進と 60 進）
+    r"[-+]?0b[0-1_]+|[-+]?0[0-7_]+|[-+]?(?:0|[1-9][0-9_]*)|[-+]?0x[0-9a-fA-F_]+",
+    r"[-+]?[1-9][0-9_]*(?::[0-5]?[0-9])+",
+    # int（1.2 core: 先頭 0 の 10 進・0o・0x）
+    r"[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+",
+    # float（1.1）
+    r"[-+]?[0-9][0-9_]*\.[0-9_]*(?:[eE][-+][0-9]+)?|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?",
+    r"[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*",
+    # float（1.2 core）
+    r"[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?",
+    # int / float（ruamel.yaml の 1.2 resolver。仕様より広く `_` を受け付ける）
+    r"[-+]?0o?[0-7_]+|[-+][0-9_]+|[0-9][0-9_]*",
+    r"[-+]?[0-9][0-9_]*\.[0-9_]*(?:[eE][-+]?[0-9]+)?|[-+]?[0-9][0-9_]*[eE][-+]?[0-9]+"
+    r"|[-+]?\.[0-9_]+(?:[eE][-+][0-9]+)?",
+    r"[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN)",
+    # timestamp（1.1）。時刻が付くのは HH:MM:SS が続くときだけ
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}",
+    r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?"
+    r"(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?",
+]))
 
 
 def parse_frontmatter(text, where="frontmatter"):
@@ -125,6 +143,11 @@ class FrontmatterParser(unittest.TestCase):
         fm, body = parse_frontmatter("---\nname: issue\ndescription: 日本語の説明「引用」も可\n---\n本文\n")
         self.assertEqual(fm, {"name": "issue", "description": "日本語の説明「引用」も可"})
         self.assertEqual(body, "本文\n")
+        # YAML でも文字列のままの値は通す
+        for value in ["2026-11-10 の案内", "2026-11-10T", ".", "yEs", "1.2.3", "v1", "0x", "1:60"]:
+            with self.subTest(value=value):
+                fm, _ = parse_frontmatter(f"---\nname: issue\ndescription: {value}\n---\n本文\n")
+                self.assertEqual(fm["description"], value)
 
     def test_rejects_invalid_yaml(self):
         bad = [
@@ -143,6 +166,17 @@ class FrontmatterParser(unittest.TestCase):
             "description: 1.5",
             "description: .inf",
             "description: 2026-11-10",
+            "description: 2026-11-10 12:30:00",
+            "description: 2026-11-10T12:30:00Z",
+            "description: 1:20",
+            "description: 1:23:45",
+            "description: 12:30:00",
+            "description: 08",
+            "description: 0o17",
+            "description: -1.5e+3",
+            "description: 1e3",
+            "description: <<",
+            "description: =",
             "when_to_use: Yes",
             "名前: issue",
             "name issue",
