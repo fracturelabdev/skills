@@ -12,12 +12,40 @@ SKILLS = ["issue", "pr", "docs"]
 JA = re.compile(r"[぀-ヿ一-鿿]")
 
 
-def frontmatter(path):
-    text = path.read_text(encoding="utf-8")
+# YAML のプレーンスカラーとして解釈できない先頭文字（フロー・引用・ブロック・タグなど）
+YAML_INDICATORS = set("[]{}&*!|>'\"%@`,#")
+KEY = re.compile(r"[a-z][a-z0-9_-]*")
+
+
+def parse_frontmatter(text, where="frontmatter"):
+    """標準ライブラリだけで、frontmatter が「1 行 1 個の `key: プレーンスカラー`」であることを厳密に検査する。
+
+    YAML として別の型に解釈される値や解析に失敗する値（`[日本語` など）を通さない。
+    """
     m = re.match(r"---\n(.*?)\n---\n(.*)", text, re.S)
-    assert m, f"{path}: frontmatter がない"
-    fm = dict(line.split(":", 1) for line in m.group(1).splitlines() if ":" in line)
-    return {k.strip(): v.strip() for k, v in fm.items()}, m.group(2)
+    if not m:
+        raise ValueError(f"{where}: frontmatter がない")
+    fm = {}
+    for n, line in enumerate(m.group(1).splitlines(), 2):
+        if not line.strip():
+            continue
+        key, sep, value = line.partition(":")
+        value = value.strip()
+        if not sep or not KEY.fullmatch(key):
+            raise ValueError(f"{where}:{n}: `key: value` の形でない: {line!r}")
+        if key in fm:
+            raise ValueError(f"{where}:{n}: キーが重複している: {key}")
+        if not value:
+            raise ValueError(f"{where}:{n}: 値が空")
+        if (value[0] in YAML_INDICATORS or value[:2] in ("- ", "? ", ": ")
+                or ": " in value or " #" in value or value.endswith(":")):
+            raise ValueError(f"{where}:{n}: YAML のプレーンスカラーとして解釈できない値: {value!r}")
+        fm[key] = value
+    return fm, m.group(2)
+
+
+def frontmatter(path):
+    return parse_frontmatter(path.read_text(encoding="utf-8"), str(path))
 
 
 class Structure(unittest.TestCase):
@@ -59,9 +87,12 @@ class Structure(unittest.TestCase):
 
     def test_decisions(self):
         t = (ROOT / "DECISIONS.md").read_text(encoding="utf-8")
-        last = t.rstrip("\n").splitlines()[-1]
-        self.assertTrue(last.startswith("| 2026-11-10 |"))
-        self.assertIn("`tickets`", last)
+        rows = [line for line in t.splitlines() if re.match(r"\| \d{4}-\d{2}-\d{2} \|", line)]
+        # 決定は表に追記していくので、今回の行が最終行であることは求めない
+        mine = [i for i, line in enumerate(rows) if line.startswith("| 2026-11-10 |") and "`tickets`" in line]
+        self.assertEqual(len(mine), 1)
+        # 日付は昇順（追記順）に並ぶ
+        self.assertEqual([r[2:12] for r in rows], sorted(r[2:12] for r in rows))
         self.assertNotIn("最初のプラグインのテーマと、入れる Skill", t)
         self.assertNotIn("プラグイン名（呼び出し時", t)
         # 既存行（初回コミット時点）が残っている
@@ -71,6 +102,34 @@ class Structure(unittest.TestCase):
             for line in old.stdout.splitlines():
                 if line.startswith("| 2026-10-19"):
                     self.assertIn(line, t)
+
+
+class FrontmatterParser(unittest.TestCase):
+    def test_accepts_plain_scalars(self):
+        fm, body = parse_frontmatter("---\nname: issue\ndescription: 日本語の説明「引用」も可\n---\n本文\n")
+        self.assertEqual(fm, {"name": "issue", "description": "日本語の説明「引用」も可"})
+        self.assertEqual(body, "本文\n")
+
+    def test_rejects_invalid_yaml(self):
+        bad = [
+            "description: [日本語",
+            "description: {a",
+            "description: '日本語",
+            "description: 説明: 続き",
+            "description: 説明 # コメント",
+            "description:",
+            "名前: issue",
+            "name issue",
+        ]
+        for line in bad:
+            with self.subTest(line=line), self.assertRaises(ValueError):
+                parse_frontmatter(f"---\nname: issue\n{line}\n---\n本文\n")
+
+    def test_rejects_duplicate_key_and_missing_block(self):
+        with self.assertRaises(ValueError):
+            parse_frontmatter("---\nname: a\nname: b\n---\n本文\n")
+        with self.assertRaises(ValueError):
+            parse_frontmatter("本文だけ\n")
 
 
 if __name__ == "__main__":
