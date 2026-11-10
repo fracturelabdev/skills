@@ -66,7 +66,7 @@ def parse_frontmatter(text, where="frontmatter"):
             raise ValueError(f"{where}:{n}: キーが重複している: {key}")
         if not value:
             raise ValueError(f"{where}:{n}: 値が空")
-        if (value[0] in YAML_INDICATORS or value[:2] in ("- ", "? ", ": ")
+        if (value[0] in YAML_INDICATORS or value[:2] in ("- ", "? ", ": ") or value in ("-", "?")
                 or ": " in value or " #" in value or value.endswith(":")):
             raise ValueError(f"{where}:{n}: YAML のプレーンスカラーとして解釈できない値: {value!r}")
         if NON_STRING.fullmatch(value):
@@ -168,6 +168,9 @@ class FrontmatterParser(unittest.TestCase):
             "description: 2026-11-10",
             "description: 2026-11-10 12:30:00",
             "description: 2026-11-10T12:30:00Z",
+            "description: -",
+            "description: ?",
+            "description: - 日本語",
             "description: 1:20",
             "description: 1:23:45",
             "description: 12:30:00",
