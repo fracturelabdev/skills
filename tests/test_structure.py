@@ -56,12 +56,16 @@ def parse_frontmatter(text, where="frontmatter"):
         raise ValueError(f"{where}: frontmatter がない")
     fm = {}
     for n, line in enumerate(m.group(1).splitlines(), 2):
-        if not line.strip():
+        # YAML の空白はスペースとタブだけ。タブは区切りの判定を崩すので行ごと拒否し、
+        # 全角スペースなど YAML が文字として残すものは削らない
+        if "\t" in line:
+            raise ValueError(f"{where}:{n}: タブを含む: {line!r}")
+        if not line.strip(" "):
             continue
-        lm = LINE.fullmatch(line.rstrip())
+        lm = LINE.fullmatch(line.rstrip(" "))
         if not lm:
             raise ValueError(f"{where}:{n}: `key: value`（コロンの後に空白）の形でない: {line!r}")
-        key, value = lm.group(1), lm.group(2).strip()
+        key, value = lm.group(1), lm.group(2).strip(" ")
         if key in fm:
             raise ValueError(f"{where}:{n}: キーが重複している: {key}")
         if not value:
@@ -144,7 +148,8 @@ class FrontmatterParser(unittest.TestCase):
         self.assertEqual(fm, {"name": "issue", "description": "日本語の説明「引用」も可"})
         self.assertEqual(body, "本文\n")
         # YAML でも文字列のままの値は通す
-        for value in ["2026-11-10 の案内", "2026-11-10T", ".", "yEs", "1.2.3", "v1", "0x", "1:60"]:
+        for value in ["2026-11-10 の案内", "2026-11-10T", ".", "yEs", "1.2.3", "v1", "0x", "1:60",
+                      "\u3000全角スペースで始まる説明", "説明\u00a0#ではない"]:
             with self.subTest(value=value):
                 fm, _ = parse_frontmatter(f"---\nname: issue\ndescription: {value}\n---\n本文\n")
                 self.assertEqual(fm["description"], value)
@@ -168,6 +173,10 @@ class FrontmatterParser(unittest.TestCase):
             "description: 2026-11-10",
             "description: 2026-11-10 12:30:00",
             "description: 2026-11-10T12:30:00Z",
+            "description: 説明:\t続き",
+            "description: 説明\t#コメント",
+            "description: -\t項目",
+            "description:\t説明",
             "description: -",
             "description: ?",
             "description: - 日本語",
