@@ -39,6 +39,6 @@ description: GitHub Issue を fracturelab 流で書く。「Issue を書いて�
 
 ## 起票
 
-本文をファイルに書き、`gh issue create --title "..." --label improvement --body-file body.md` で渡す。シェル展開で本文を渡さない（バッククォートや `$` が壊れる）。
+本文をファイルに書き、`gh issue create --title "[Bug] ..." --label bug --body-file body.md` のように渡す。`--label` は上の表で型に対応するラベルにする（`[改修]` なら `improvement`、`[作業]` なら `task`、`[アイデア]` なら `idea`）。シェル展開で本文を渡さない（バッククォートや `$` が壊れる）。
 
 個人のフックや判定スクリプトの実行は前提にしない。

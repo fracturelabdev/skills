@@ -14,13 +14,24 @@ JA = re.compile(r"[぀-ヿ一-鿿]")
 
 # YAML のプレーンスカラーとして解釈できない先頭文字（フロー・引用・ブロック・タグなど）
 YAML_INDICATORS = set("[]{}&*!|>'\"%@`,#")
-KEY = re.compile(r"[a-z][a-z0-9_-]*")
+LINE = re.compile(r"([a-z][a-z0-9_-]*): (.*)")
+# YAML（1.1 / 1.2 core）が文字列以外（真偽値・null・数値・日付）に解決するプレーンスカラー
+NON_STRING = re.compile(
+    r"(?i:y|n|yes|no|true|false|on|off|null|~)"
+    r"|[-+]?(?:0|[1-9][0-9_]*)"
+    r"|[-+]?0(?:b[01_]+|o?[0-7_]+|x[0-9a-fA-F_]+)"
+    r"|[-+]?(?:[0-9][0-9_]*)?\.[0-9_]*(?:[eE][-+]?[0-9]+)?"
+    r"|[-+]?[0-9][0-9_]*[eE][-+]?[0-9]+"
+    r"|[-+]?\.(?i:inf)|\.(?i:nan)"
+    r"|[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt ].*)?"
+)
 
 
 def parse_frontmatter(text, where="frontmatter"):
     """標準ライブラリだけで、frontmatter が「1 行 1 個の `key: プレーンスカラー`」であることを厳密に検査する。
 
-    YAML として別の型に解釈される値や解析に失敗する値（`[日本語` など）を通さない。
+    コロンの直後に空白が無い行、解析に失敗する値（`[日本語` など）、
+    文字列以外に解決する値（`true` `null` `1` `2026-11-10` など）を通さない。
     """
     m = re.match(r"---\n(.*?)\n---\n(.*)", text, re.S)
     if not m:
@@ -29,10 +40,10 @@ def parse_frontmatter(text, where="frontmatter"):
     for n, line in enumerate(m.group(1).splitlines(), 2):
         if not line.strip():
             continue
-        key, sep, value = line.partition(":")
-        value = value.strip()
-        if not sep or not KEY.fullmatch(key):
-            raise ValueError(f"{where}:{n}: `key: value` の形でない: {line!r}")
+        lm = LINE.fullmatch(line.rstrip())
+        if not lm:
+            raise ValueError(f"{where}:{n}: `key: value`（コロンの後に空白）の形でない: {line!r}")
+        key, value = lm.group(1), lm.group(2).strip()
         if key in fm:
             raise ValueError(f"{where}:{n}: キーが重複している: {key}")
         if not value:
@@ -40,6 +51,8 @@ def parse_frontmatter(text, where="frontmatter"):
         if (value[0] in YAML_INDICATORS or value[:2] in ("- ", "? ", ": ")
                 or ": " in value or " #" in value or value.endswith(":")):
             raise ValueError(f"{where}:{n}: YAML のプレーンスカラーとして解釈できない値: {value!r}")
+        if NON_STRING.fullmatch(value):
+            raise ValueError(f"{where}:{n}: YAML で文字列以外に解決される値: {value!r}")
         fm[key] = value
     return fm, m.group(2)
 
@@ -98,10 +111,13 @@ class Structure(unittest.TestCase):
         # 既存行（初回コミット時点）が残っている
         old = subprocess.run(["git", "show", "a436f45:DECISIONS.md"], cwd=ROOT,
                              capture_output=True, text=True)
-        if old.returncode == 0:
-            for line in old.stdout.splitlines():
-                if line.startswith("| 2026-10-19"):
-                    self.assertIn(line, t)
+        # 取れないとき（shallow clone など）に黙って飛ばさない
+        self.assertEqual(old.returncode, 0,
+                         f"a436f45 の DECISIONS.md を読めない（完全な履歴が必要: git fetch --unshallow）: {old.stderr}")
+        kept = [line for line in old.stdout.splitlines() if line.startswith("| 2026-10-19")]
+        self.assertEqual(len(kept), 5)
+        for line in kept:
+            self.assertIn(line, t)
 
 
 class FrontmatterParser(unittest.TestCase):
@@ -118,6 +134,16 @@ class FrontmatterParser(unittest.TestCase):
             "description: 説明: 続き",
             "description: 説明 # コメント",
             "description:",
+            "description:日本語の説明",
+            "description: true",
+            "description: null",
+            "description: ~",
+            "description: 1",
+            "description: 0x1F",
+            "description: 1.5",
+            "description: .inf",
+            "description: 2026-11-10",
+            "when_to_use: Yes",
             "名前: issue",
             "name issue",
         ]

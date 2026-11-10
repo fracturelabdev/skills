@@ -26,10 +26,11 @@ description: Pull Request を fracturelab 流で書く。「PR 本文を書い�
 
 ## Refs と Closes の使い分け
 
-CONTRIBUTING の既定は、完全に満たしたときの `Closes #N`。
+CONTRIBUTING の既定は `Closes #N`。Issue を完了させる PR は 1 本にする。
 
-- `Closes #N`: その PR が Issue の完了条件をすべて満たし、マージで閉じるべきときだけ使う
-- `Refs #N`: 部分対応・準備・関連づけだけで、自動 close すべきでないときに使う
+- `Closes #N`: その Issue の完了条件を満たすための PR。マージで Issue が閉じる
+- 完了条件に未 ✓ があるときも、同じ PR を `Closes #N` のまま Draft で出し、満たしてから Ready にする。部分対応をマージして続きを別 PR に回さない。分けたいなら先に Issue を分割する
+- `Refs #N`: CONTRIBUTING に無い例外。その Issue の完了条件を満たす目的ではない関連づけ（準備や調査など、マージしても閉じるべきでないもの）に限って使う
 - `[アイデア]` の Issue には PR を紐付けない
 - 対応 Issue は 1 件だけ
 
