@@ -5,5 +5,17 @@
     "name": "fracturelab",
     "url": "https://fracturelab.dev"
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "tickets",
+      "source": "./plugins/tickets",
+      "description": "fracturelab 流の GitHub Issue / PR の書き方と、ドキュメントの置き場所を案内する",
+      "version": "0.1.0",
+      "author": {
+        "name": "fracturelab",
+        "url": "https://fracturelab.dev"
+      },
+      "license": "MIT"
+    }
+  ]
 }
