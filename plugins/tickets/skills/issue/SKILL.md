@@ -44,10 +44,32 @@ Form の任意欄（改修の関連 Issue / PR、作業の期限、アイデア�
 作成先のリポジトリを先に 1 つ決め、ラベルの確認、不足ラベルの作成、起票をすべてそのリポジトリだけで行う。作成先が決まらないときは何も作らない。
 
 1. 作成先の指定があればその `OWNER/REPO` を使う。無ければ `gh repo view --json nameWithOwner --jq .nameWithOwner` の結果を使う。コマンドが失敗する、結果が空、または意図したリポジトリと違うときは中止する
-2. `gh label list --repo OWNER/REPO --limit 200 --json name --jq '.[].name'` でラベル名を取る。既定の 30 件では足りないので `--limit 200` を付ける。200 件を超えるときは増やす。型のラベルと完全一致するものが無いときだけ、同じ `--repo` で `gh label create <label> --repo OWNER/REPO` を実行する
-3. 必須欄を見出しにした本文をファイルに書く。シェル展開で本文を渡さない（バッククォートや `$` が壊れる）
-4. `gh issue create --repo OWNER/REPO --title "[Bug] ..." --label bug --body-file body.md` を実行する。`--label` は、手順 2 のあと作成先にある型のラベルにする（`[改修]` は `improvement`、`[作業]` は `task`、`[アイデア]` は `idea`）
+2. ラベル名は次で全部取る。`gh label list --limit` は既定 30 件で、数を指定してもその件数で打ち切る。打ち切っても終了コードは 0 のままなので使わない
 
-`gh issue create --label` は、作成先に無いラベルだと失敗する。ラベルを外して起票したり、別リポジトリのラベルで代用したりしない。
+   ```
+   gh api --paginate "repos/OWNER/REPO/labels" --jq '.[].name'
+   ```
+
+   終了コードが 0 でないときは中止する。終了コードが 0 なら、名前が 0 件でも取得成功として手順 3 へ進む
+3. 正規名は上の表のラベル列（`bug` `improvement` `task` `idea`）である。GitHub のラベル名は大文字小文字を区別しない。正規名と、手順 2 の各 `name` を、大文字小文字を無視した完全一致で照合する（`bug` は `bugfix` に一致しない）。一致した既存の `name` を、表記を変えずに `LABEL` にする。`Bug` があるときに `bug` は作らない。一致が 2 件以上なら中止する
+4. 一致が 0 件のときだけ、同じリポジトリで `gh label create <正規名> --repo OWNER/REPO` を実行し、その正規名を `LABEL` にする。`--force` は付けない。終了コードが 0 でなければ中止する。名前を変えて作り直さない
+5. 本文は作業ツリーに書かない。相対パス `body.md` は、既にある `body.md` を上書きし得る。`BODY=$(mktemp)` で一時ファイルを作り、直後に `trap 'rm -f "$BODY"' EXIT` を置く。必須欄を見出しにした本文を `$BODY` に書く。シェル展開で本文を渡さない（バッククォートや `$` が壊れる）。`trap` を置かないときは、成功・失敗・中止のどれでも、戻る前に `rm -f "$BODY"` で消す
+6. `TITLE` は型の接頭辞を含むタイトル、`LABEL` は手順 3 または 4 で決めた名前にする。コマンドの `--label` は `$LABEL` とし、`bug` のように型で固定した名前を書かない
+
+   ```
+   gh issue create --repo OWNER/REPO --title "$TITLE" --label "$LABEL" --body-file "$BODY"
+   ```
+
+   例: `[改修]` で既存が無いとき `TITLE='[改修] 一覧の絞り込みを保存できるようにする'`、`LABEL=improvement`。既存が `Improvement` なら `LABEL=Improvement`。`[作業]` なら正規名は `task`、`[アイデア]` なら `idea`、`[Bug]` なら `bug` で、いずれも既存の表記があればそちらを `LABEL` にする
+
+次のときは中止する。ラベルを外して起票したり、別リポジトリのラベルで代用したり、`--label` を外して再実行したりしない。
+
+- 作成先が決まらない
+- ラベル一覧の取得に失敗した
+- 大文字小文字を無視した完全一致が 2 件以上ある
+- `gh label create` が失敗した
+- `gh issue create` が失敗した
+
+`gh issue create --label` は、作成先に無いラベルだと失敗する。
 
 個人のフックや判定スクリプトの実行は前提にしない。

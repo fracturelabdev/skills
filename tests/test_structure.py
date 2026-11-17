@@ -2,6 +2,7 @@
 """構造検査（標準ライブラリのみ、秘密情報不要）。実行: python3 tests/test_structure.py"""
 import json
 import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +10,8 @@ ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = ROOT / "plugins" / "tickets"
 SKILLS = ["issue", "pr", "docs"]
 JA = re.compile(r"[぀-ヿ一-鿿]")
+# .claude-plugin の検査で数えない OS 生成物。先頭が . の隠しファイルは別途除く。
+OS_GENERATED = {"thumbs.db", "ehthumbs.db", "desktop.ini"}
 # marketplace 雛形で入った決定。shallow clone でも比較できるよう、コミットではなくこの定数を正とする
 BASELINE_DECISIONS = [
     "| 2026-10-19 | repo は `fracturelabdev/skills`、最初から public | 少しずつ足していく前提。足すたびに `FLB-ORG-002` §I（差分）を通す |",
@@ -24,7 +27,8 @@ YAML_INDICATORS = set("[]{}&*!|>'\"%@`,#")
 LINE = re.compile(r"([a-z][a-z0-9_-]*): (.*)")
 # YAML が文字列以外に解決するプレーンスカラー。YAML 1.1（PyYAML の implicit resolver）と
 # YAML 1.2 core schema（仕様と ruamel.yaml の実装）の和集合で、どれか 1 つでも文字列に
-# ならない値を拒否する。仕様にあって実装が解決しない値（`y` `.1e7` など）も安全側で拒否する。
+# ならない値を拒否する。仕様にあって実装が解決しない値（`y` `.1e7` など）と、
+# 仕様上は文字列の符号付き NaN（`-.nan` `+.NaN` `+.NAN`）も安全側で拒否する。
 NON_STRING = re.compile("|".join([
     # bool（1.1 / 1.2）
     r"yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF|y|Y|n|N",
@@ -44,7 +48,10 @@ NON_STRING = re.compile("|".join([
     r"[-+]?0o?[0-7_]+|[-+][0-9_]+|[0-9][0-9_]*",
     r"[-+]?[0-9][0-9_]*\.[0-9_]*(?:[eE][-+]?[0-9]+)?|[-+]?[0-9][0-9_]*[eE][-+]?[0-9]+"
     r"|[-+]?\.[0-9_]+(?:[eE][-+][0-9]+)?",
-    r"[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN)",
+    # inf は仕様どおり符号付き。nan は YAML 1.1 / 1.2 core も PyYAML / ruamel.yaml も
+    # 符号なし（.nan .NaN .NAN）だけを float にする。符号付きを float にする実装があるため、
+    # -.nan +.NaN +.NAN を含む符号付きも拒否する。
+    r"[-+]?\.(?:inf|Inf|INF)|[-+]?\.(?:nan|NaN|NAN)",
     # timestamp（1.1）。時刻が付くのは HH:MM:SS が続くときだけ
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}",
     r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?"
@@ -90,11 +97,32 @@ def frontmatter(path):
     return parse_frontmatter(path.read_text(encoding="utf-8"), str(path))
 
 
+def listed_plugin_files(directory):
+    """隠しファイル（`.DS_Store` など）と OS の生成物を除いたエントリ名。"""
+    return sorted(
+        p.name
+        for p in directory.iterdir()
+        if not p.name.startswith(".") and p.name.lower() not in OS_GENERATED
+    )
+
+
 class Structure(unittest.TestCase):
     def test_manifest(self):
         d = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(d["name"], "tickets")
-        self.assertEqual(sorted(p.name for p in (PLUGIN / ".claude-plugin").iterdir()), ["plugin.json"])
+        # 必要な plugin.json 以外の実ファイルが無いこと。隠しファイルと OS の生成物では落とさない。
+        self.assertEqual(listed_plugin_files(PLUGIN / ".claude-plugin"), ["plugin.json"])
+
+    def test_listed_plugin_files_skips_hidden_and_os_junk(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "plugin.json").write_text("{}", encoding="utf-8")
+            (root / ".DS_Store").write_bytes(b"")
+            (root / "._plugin.json").write_bytes(b"")
+            (root / "Thumbs.db").write_bytes(b"")
+            (root / "desktop.ini").write_bytes(b"")
+            (root / "extra.txt").write_text("x", encoding="utf-8")
+            self.assertEqual(listed_plugin_files(root), ["extra.txt", "plugin.json"])
 
     def test_skills(self):
         found = sorted(p.parent.name for p in (PLUGIN / "skills").glob("*/SKILL.md"))
@@ -173,6 +201,15 @@ class FrontmatterParser(unittest.TestCase):
             "description: 0x1F",
             "description: 1.5",
             "description: .inf",
+            "description: .nan",
+            "description: .NaN",
+            "description: .NAN",
+            "description: -.nan",
+            "description: +.NaN",
+            "description: +.NAN",
+            "description: +.nan",
+            "description: -.NaN",
+            "description: -.NAN",
             "description: 2026-11-10",
             "description: 2026-11-10 12:30:00",
             "description: 2026-11-10T12:30:00Z",
