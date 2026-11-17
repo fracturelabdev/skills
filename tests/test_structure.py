@@ -2,7 +2,6 @@
 """構造検査（標準ライブラリのみ、秘密情報不要）。実行: python3 tests/test_structure.py"""
 import json
 import re
-import subprocess
 import unittest
 from pathlib import Path
 
@@ -10,6 +9,14 @@ ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = ROOT / "plugins" / "tickets"
 SKILLS = ["issue", "pr", "docs"]
 JA = re.compile(r"[぀-ヿ一-鿿]")
+# marketplace 雛形で入った決定。shallow clone でも比較できるよう、コミットではなくこの定数を正とする
+BASELINE_DECISIONS = [
+    "| 2026-10-19 | repo は `fracturelabdev/skills`、最初から public | 少しずつ足していく前提。足すたびに `FLB-ORG-002` §I（差分）を通す |",
+    "| 2026-10-19 | 1 repo に marketplace を 1 つ置き、テーマ別に複数プラグインを置く | 利用者は必要なテーマだけ入れられ、管理する repo は 1 つで済む |",
+    "| 2026-10-19 | marketplace 名は `fracturelab` | インストール名が `<plugin>@fracturelab` になる |",
+    "| 2026-10-19 | プラグインは `plugins/<name>/` に置く | 公式の marketplace 構成例に合わせる |",
+    "| 2026-10-19 | 日本語のみ | 想定利用者は日本語話者 |",
+]
 
 
 # YAML のプレーンスカラーとして解釈できない先頭文字（フロー・引用・ブロック・タグなど）
@@ -130,16 +137,12 @@ class Structure(unittest.TestCase):
         self.assertEqual([r[2:12] for r in rows], sorted(r[2:12] for r in rows))
         self.assertNotIn("最初のプラグインのテーマと、入れる Skill", t)
         self.assertNotIn("プラグイン名（呼び出し時", t)
-        # 既存行（初回コミット時点）が残っている
-        old = subprocess.run(["git", "show", "a436f45:DECISIONS.md"], cwd=ROOT,
-                             capture_output=True, text=True)
-        # 取れないとき（shallow clone など）に黙って飛ばさない
-        self.assertEqual(old.returncode, 0,
-                         f"a436f45 の DECISIONS.md を読めない（完全な履歴が必要: git fetch --unshallow）: {old.stderr}")
-        kept = [line for line in old.stdout.splitlines() if line.startswith("| 2026-10-19")]
-        self.assertEqual(len(kept), 5)
-        for line in kept:
-            self.assertIn(line, t)
+        # 2026-10-19 の 5 行。git の履歴を引かず、この文字列がこの順で残っていることだけを見る
+        pos = 0
+        for line in BASELINE_DECISIONS:
+            i = t.find(line, pos)
+            self.assertGreaterEqual(i, 0, line)
+            pos = i + len(line)
 
 
 class FrontmatterParser(unittest.TestCase):

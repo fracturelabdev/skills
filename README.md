@@ -34,6 +34,8 @@ Skill は `/<plugin>:<skill>` の形で呼び出します。
 - 個人の環境（特定のパス・アカウント・認証情報）に依存する Skill は載せません
 - 決めたことは [`DECISIONS.md`](DECISIONS.md) に残します
 
+構造の検査は `python3 tests/test_structure.py` で実行する。
+
 ## ライセンス
 
 [MIT](LICENSE)
