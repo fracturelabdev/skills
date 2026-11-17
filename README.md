@@ -10,6 +10,13 @@ claude plugin marketplace add fracturelabdev/skills
 claude plugin install <plugin>@fracturelab
 ```
 
+例（`tickets` を入れる場合）:
+
+```sh
+claude plugin marketplace add fracturelabdev/skills
+claude plugin install tickets@fracturelab
+```
+
 セッション内では `/plugin marketplace add fracturelabdev/skills` でも登録できます。
 Skill は `/<plugin>:<skill>` の形で呼び出します。
 
@@ -19,13 +26,15 @@ Skill は `/<plugin>:<skill>` の形で呼び出します。
 
 | プラグイン | 内容 |
 |---|---|
-| （準備中） | |
+| [`tickets`](plugins/tickets) | fracturelab 流の GitHub Issue / PR の書き方と、ドキュメントの置き場所の案内（`/tickets:issue` `/tickets:pr` `/tickets:docs`） |
 
 ## 方針
 
 - 日本語で書きます
 - 個人の環境（特定のパス・アカウント・認証情報）に依存する Skill は載せません
 - 決めたことは [`DECISIONS.md`](DECISIONS.md) に残します
+
+構造の検査は `python3 tests/test_structure.py` で実行する。
 
 ## ライセンス
 
