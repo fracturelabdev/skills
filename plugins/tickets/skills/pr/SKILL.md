@@ -12,7 +12,7 @@ description: Pull Request を fracturelab 流で書く。「PR 本文を書い�
 - 1 Issue = 1 branch = 1 PR。複数の Issue を 1 つの PR で閉じない
 - 本文は日本語。branch 名、commit の type、scope は英語
 - `[アイデア]` の Issue には PR を紐付けない。着手するときは `[改修]` を起票し直す
-- `[作業]` の PR 紐付けは任意。任意なのは PR を出さない場合だけで、PR を出すときはほかの型と同じく Issue を 1 件に紐付ける。出さないときの各欄は「`[作業]` で紐付けないとき」に従う
+- `[作業]` の PR 紐付けは任意。任意なのは branch も commit も PR も作らない場合だけである。PR を出すときはほかの型と同じく Issue を 1 件に紐付ける。出さないときの各欄は「`[作業]` で紐付けないとき」に従う
 
 ## type
 
@@ -34,7 +34,7 @@ branch 名・commit 件名・PR タイトルで共通。次の 6 つだけ。
 ```
 
 - scope は付けない。説明は小文字・ハイフン区切り・3 語以内
-- 自由記述は入れない。Issue 番号のない branch は作らない。紐付けない `[作業]` では branch 自体を作らない
+- 自由記述は入れない。Issue 番号のない branch は作らない。紐付けない `[作業]` では branch も commit も PR も作らない
 - 例: `fix/123-login-timeout`、`feat/456-export-csv`、`docs/78-api-guide`
 
 ## commit と PR タイトル
@@ -75,14 +75,14 @@ PR を出すときは、`Closes #N` を見出し `## 対応 Issue` に 1 件だ�
 
 ## `[作業]` で紐付けないとき
 
-CONTRIBUTING は `[作業]` の PR 紐付けを任意としている。branch・commit・PR タイトルは Issue 番号が必須で、差し戻し基準は、対応 Issue が無い PR と、branch 名・タイトルが形式に合わない PR を Draft に戻す。`.github` の PR format check も、`## 対応 Issue` に番号が無い、またはタイトルが `(#N)` で終わらないと失敗する。
+CONTRIBUTING は `[作業]` の PR 紐付けを任意としている。branch・commit・PR タイトルは Issue 番号が必須で、差し戻し基準は、対応 Issue が無い PR と、branch 名・タイトルが形式に合わない PR を Draft に戻す。`.github` の PR format check も、`## 対応 Issue` に `#` と番号が無い、またはタイトルが `(#N)` で終わらないと失敗する。番号の無い `[作業]` を PR にすると、この検査で失敗する。
 
-紐付けないときは PR を出さない。番号の無い branch や、見出しを空にした PR は作らない。PR を出す `[作業]` は、ほかの型と同じく `Closes #N` を 1 件だけ書く。
+紐付けないときは、branch も commit も PR も作らない。`(#N)` を省いた件名や type を変えた件名も、件名の形式を問わず作らない。番号の無い branch と、見出しを空にした PR も作らない。PR を出す `[作業]` は、ほかの型と同じく `Closes #N` を 1 件だけ書く。
 
 | 欄 | 紐付けないとき | 紐付けるとき |
 |---|---|---|
 | branch 名 | 作らない | `<type>/<issue番号>-<英語の短い説明>` |
-| commit 件名 | この形式では作らない | `<type>(<scope>): <要約> (#N)` |
+| commit | 作らない。件名の形式を変えても作らない | `<type>(<scope>): <要約> (#N)` |
 | PR タイトル | 作らない（PR を出さない） | commit 件名と同じ形式 |
 | `## 対応 Issue` | 作らない | 消さず、`Closes #N` を 1 件だけ書く |
 | `Refs #N` | 書かない | 書かない |

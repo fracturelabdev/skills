@@ -29,7 +29,19 @@ LINE = re.compile(r"([a-z][a-z0-9_-]*): (.*)")
 # YAML 1.2 core schema（仕様と ruamel.yaml の実装）の和集合で、どれか 1 つでも文字列に
 # ならない値を拒否する。仕様にあって実装が解決しない値（`y` `.1e7` など）と、
 # 仕様上は文字列の符号付き NaN（`-.nan` `+.NaN` `+.NAN`）も安全側で拒否する。
-NON_STRING = re.compile("|".join([
+def compile_non_string(parts):
+    """選択肢を `|` で連結する。空の選択肢（`||`、先頭や末尾の `|`）は拒否する。
+
+    断片を文字列連結するとき、次の断片を `|` で始めない。`"|".join` が間に
+    `|` を足すので、先頭の `|` と重なると空の選択肢になる。
+    """
+    for part in parts:
+        if not part or part.startswith("|") or part.endswith("|") or "||" in part:
+            raise ValueError(f"空の選択肢がある: {part!r}")
+    return re.compile("|".join(parts))
+
+
+NON_STRING = compile_non_string([
     # bool（1.1 / 1.2）
     r"yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF|y|Y|n|N",
     # null・merge・value（1.1）
@@ -40,14 +52,16 @@ NON_STRING = re.compile("|".join([
     # int（1.2 core: 先頭 0 の 10 進・0o・0x）
     r"[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+",
     # float（1.1）
-    r"[-+]?[0-9][0-9_]*\.[0-9_]*(?:[eE][-+][0-9]+)?|\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?",
+    r"[-+]?[0-9][0-9_]*\.[0-9_]*(?:[eE][-+][0-9]+)?",
+    r"\.[0-9][0-9_]*(?:[eE][-+][0-9]+)?",
     r"[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*",
     # float（1.2 core）
     r"[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?",
     # int / float（ruamel.yaml の 1.2 resolver。仕様より広く `_` を受け付ける）
     r"[-+]?0o?[0-7_]+|[-+][0-9_]+|[0-9][0-9_]*",
-    r"[-+]?[0-9][0-9_]*\.[0-9_]*(?:[eE][-+]?[0-9]+)?|[-+]?[0-9][0-9_]*[eE][-+]?[0-9]+"
-    r"|[-+]?\.[0-9_]+(?:[eE][-+][0-9]+)?",
+    r"[-+]?[0-9][0-9_]*\.[0-9_]*(?:[eE][-+]?[0-9]+)?",
+    r"[-+]?[0-9][0-9_]*[eE][-+]?[0-9]+",
+    r"[-+]?\.[0-9_]+(?:[eE][-+][0-9]+)?",
     # inf は仕様どおり符号付き。nan は YAML 1.1 / 1.2 core も PyYAML / ruamel.yaml も
     # 符号なし（.nan .NaN .NAN）だけを float にする。符号付きを float にする実装があるため、
     # -.nan +.NaN +.NAN を含む符号付きも拒否する。
@@ -56,7 +70,7 @@ NON_STRING = re.compile("|".join([
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}",
     r"[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:[Tt]|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?"
     r"(?:[ \t]*(?:Z|[-+][0-9]{1,2}(?::[0-9]{2})?))?",
-]))
+])
 
 
 def parse_frontmatter(text, where="frontmatter"):
@@ -107,8 +121,18 @@ def listed_plugin_files(directory):
     return sorted(p.name for p in directory.iterdir() if is_plugin_content_name(p.name))
 
 
+# README の「個人の環境（特定のパス）」に合わせ、~/.claude だけを見ない。
+# ホーム相対（~/... と ~user/...）、macOS / Linux / Windows のユーザーディレクトリ。
+PERSONAL_PATH = re.compile(
+    r"~/[^\s`\"')\]]+"
+    r"|~[A-Za-z0-9][A-Za-z0-9._-]*/[^\s`\"')\]]*"
+    r"|/(?:Users|home)/[^\s`\"')\]]+"
+    r"|[A-Za-z]:[\\/]Users[\\/][^\s`\"')\]]*"
+)
+
+
 def personal_path_problems(directory):
-    """実ファイルに `~/.claude` があるか、UTF-8 として読めないかを返す。
+    """実ファイルに個人環境のパスがあるか、UTF-8 として読めないかを返す。
 
     隠しファイルと OS 生成物は `listed_plugin_files` と同じ基準で読まない。
     親ディレクトリが `.claude-plugin` でも、実ファイル（`plugin.json` など）は読む。
@@ -126,8 +150,9 @@ def personal_path_problems(directory):
         except UnicodeDecodeError:
             problems.append(f"{shown}: UTF-8 として読めない")
             continue
-        if "~/.claude" in text:
-            problems.append(f"{shown}: ~/.claude を含む")
+        match = PERSONAL_PATH.search(text)
+        if match:
+            problems.append(f"{shown}: 個人環境のパスを含む ({match.group(0)})")
     return problems
 
 
@@ -199,7 +224,7 @@ class Structure(unittest.TestCase):
             with self.subTest("text hit"):
                 self.assertEqual(
                     personal_path_problems(root),
-                    ["skills/issue/diagram.bin: ~/.claude を含む"],
+                    ["skills/issue/diagram.bin: 個人環境のパスを含む (~/.claude)"],
                 )
 
             binary.write_text("参照しない\n", encoding="utf-8")
@@ -207,8 +232,31 @@ class Structure(unittest.TestCase):
             with self.subTest("hidden directory still scanned"):
                 self.assertEqual(
                     personal_path_problems(root),
-                    [".claude-plugin/plugin.json: ~/.claude を含む"],
+                    [".claude-plugin/plugin.json: 個人環境のパスを含む (~/.claude)"],
                 )
+
+            manifest.write_text('{"name": "tickets"}\n', encoding="utf-8")
+            samples = [
+                ("~/Documents/memo.md", "~/Documents/memo.md"),
+                ("/Users/ada/notes.md", "/Users/ada/notes.md"),
+                ("/home/ada/.config", "/home/ada/.config"),
+                ("C:\\Users\\ada\\notes", "C:\\Users\\ada\\notes"),
+                ("~ada/notes.md", "~ada/notes.md"),
+            ]
+            for text, shown in samples:
+                binary.write_text(text + "\n", encoding="utf-8")
+                with self.subTest(text=text):
+                    self.assertEqual(
+                        personal_path_problems(root),
+                        [f"skills/issue/diagram.bin: 個人環境のパスを含む ({shown})"],
+                    )
+
+            binary.write_text(
+                "手順は docs/dev/setup.md と https://github.com/fracturelabdev/skills\n",
+                encoding="utf-8",
+            )
+            with self.subTest("ordinary paths"):
+                self.assertEqual(personal_path_problems(root), [])
 
     def test_marketplace(self):
         d = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
@@ -216,6 +264,14 @@ class Structure(unittest.TestCase):
         e = [p for p in d["plugins"] if p["name"] == "tickets"]
         self.assertEqual(len(e), 1)
         self.assertEqual(e[0]["source"], "./plugins/tickets")
+        # plugin.json と同じ display fields。author は name 必須のオブジェクト、license は SPDX 文字列。
+        author = e[0]["author"]
+        self.assertIsInstance(author, dict)
+        self.assertTrue(author["name"].strip())
+        self.assertTrue(author["url"].startswith("https://"))
+        self.assertLessEqual(set(author), {"name", "email", "url"})
+        self.assertIsInstance(e[0]["license"], str)
+        self.assertEqual(e[0]["license"], "MIT")
 
     def test_readme(self):
         t = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -223,6 +279,41 @@ class Structure(unittest.TestCase):
         self.assertNotIn("（準備中）", t)
         self.assertIn("claude plugin marketplace add fracturelabdev/skills", t)
         self.assertIn("claude plugin install tickets@fracturelab", t)
+
+    def test_guidance_matches_sources(self):
+        docs = (PLUGIN / "skills" / "docs" / "SKILL.md").read_text(encoding="utf-8")
+        issue = (PLUGIN / "skills" / "issue" / "SKILL.md").read_text(encoding="utf-8")
+        pr = (PLUGIN / "skills" / "pr" / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "命名、同じ内容を 2 箇所に書かないこと、空のディレクトリを作らないこと、"
+            "個人環境のパスを書かないことは、「守ること」として常に適用する。",
+            docs,
+        )
+        self.assertIn("両方あるときにルート側へ移さない。", docs)
+        self.assertNotIn("以下は使わない", docs)
+
+        self.assertIn("4 点と 5 点も分ける", issue)
+        self.assertIn("4 点と 5 点は分けない", issue)
+        self.assertIn("4 点と 5 点は分けず", issue)
+        self.assertIn("同じシェルプロセスで続ける", issue)
+        self.assertIn("既にある EXIT trap を消して置き換わる", issue)
+        self.assertIn("必須引数はラベル名だけである", issue)
+        self.assertIn("ページごとの出力を続けたものが全件になる", issue)
+
+        headings = [
+            "## 対応 Issue",
+            "## 変更概要",
+            "## 完了条件の充足",
+            "## 検証証跡",
+            "## レビュー観点",
+            "## 補足（任意・200字以内）",
+        ]
+        positions = [pr.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("この形式では作らない", pr)
+        self.assertIn("件名の形式を変えても作らない", pr)
+        self.assertIn("`Refs #N` | 書かない | 書かない |", pr)
 
     def test_decisions(self):
         t = (ROOT / "DECISIONS.md").read_text(encoding="utf-8")
@@ -305,6 +396,16 @@ class FrontmatterParser(unittest.TestCase):
         for line in bad:
             with self.subTest(line=line), self.assertRaises(ValueError):
                 parse_frontmatter(f"---\nname: issue\n{line}\n---\n本文\n")
+
+    def test_non_string_rejects_empty_alternative(self):
+        self.assertNotIn("||", NON_STRING.pattern)
+        self.assertFalse(NON_STRING.pattern.startswith("|"))
+        self.assertFalse(NON_STRING.pattern.endswith("|"))
+        self.assertIsNone(NON_STRING.fullmatch(""))
+        self.assertIsNone(NON_STRING.fullmatch("説明"))
+        for bad in ["|yes", "yes|", "yes||no", ""]:
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                compile_non_string([bad])
 
     def test_rejects_duplicate_key_and_missing_block(self):
         with self.assertRaises(ValueError):
