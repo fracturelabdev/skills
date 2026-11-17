@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = ROOT / "plugins" / "tickets"
 SKILLS = ["issue", "pr", "docs"]
 JA = re.compile(r"[぀-ヿ一-鿿]")
-# .claude-plugin の検査で数えない OS 生成物。先頭が . の隠しファイルは別途除く。
+# プラグインの実体として数えない OS 生成物。先頭が . の隠しファイルは別途除く。
 OS_GENERATED = {"thumbs.db", "ehthumbs.db", "desktop.ini"}
 # marketplace 雛形で入った決定。shallow clone でも比較できるよう、コミットではなくこの定数を正とする
 BASELINE_DECISIONS = [
@@ -97,13 +97,38 @@ def frontmatter(path):
     return parse_frontmatter(path.read_text(encoding="utf-8"), str(path))
 
 
+def is_plugin_content_name(name):
+    """隠しファイル（`.DS_Store` など）と OS の生成物でなければ True。"""
+    return not name.startswith(".") and name.lower() not in OS_GENERATED
+
+
 def listed_plugin_files(directory):
     """隠しファイル（`.DS_Store` など）と OS の生成物を除いたエントリ名。"""
-    return sorted(
-        p.name
-        for p in directory.iterdir()
-        if not p.name.startswith(".") and p.name.lower() not in OS_GENERATED
+    return sorted(p.name for p in directory.iterdir() if is_plugin_content_name(p.name))
+
+
+def personal_path_problems(directory):
+    """実ファイルに `~/.claude` があるか、UTF-8 として読めないかを返す。
+
+    隠しファイルと OS 生成物は `listed_plugin_files` と同じ基準で読まない。
+    親ディレクトリが `.claude-plugin` でも、実ファイル（`plugin.json` など）は読む。
+    それ以外でデコードできないファイルは黙って飛ばさない。文字として判定できないので
+    本文は検索せず、「UTF-8 として読めない」として返す。`UnicodeDecodeError` は出さない。
+    """
+    problems = []
+    files = sorted(
+        p for p in directory.rglob("*") if p.is_file() and is_plugin_content_name(p.name)
     )
+    for p in files:
+        shown = p.relative_to(directory).as_posix()
+        try:
+            text = p.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            problems.append(f"{shown}: UTF-8 として読めない")
+            continue
+        if "~/.claude" in text:
+            problems.append(f"{shown}: ~/.claude を含む")
+    return problems
 
 
 class Structure(unittest.TestCase):
@@ -137,9 +162,53 @@ class Structure(unittest.TestCase):
             self.assertFalse(set(fm) - {"name", "description", "when_to_use"})
 
     def test_no_personal_paths(self):
-        for p in PLUGIN.rglob("*"):
-            if p.is_file():
-                self.assertNotIn("~/.claude", p.read_text(encoding="utf-8"), p)
+        self.assertEqual(personal_path_problems(PLUGIN), [])
+
+    def test_personal_path_problems_skip_junk_and_flag_undecodable(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            plugin_dir = root / ".claude-plugin"
+            plugin_dir.mkdir()
+            manifest = plugin_dir / "plugin.json"
+            manifest.write_text('{"name": "tickets"}\n', encoding="utf-8")
+            skill = root / "skills" / "issue"
+            skill.mkdir(parents=True)
+            guide = skill / "SKILL.md"
+            guide.write_text("日本語の手順\n", encoding="utf-8")
+            # 隠しファイルと OS 生成物は、バイナリでも個人パスを含んでいても読まない。
+            (root / ".DS_Store").write_bytes(b"\xff\xfe~/.claude\x00")
+            (plugin_dir / ".DS_Store").write_bytes(b"\x80~/.claude")
+            (skill / "._SKILL.md").write_bytes(b"\xff~/.claude")
+            (skill / "Thumbs.db").write_bytes(b"\xff~/.claude")
+            (root / "EhThumbs.db").write_bytes(b"~/.claude")
+            (plugin_dir / "Desktop.ini").write_text("~/.claude\n", encoding="utf-8")
+
+            with self.subTest("os junk"):
+                self.assertEqual(personal_path_problems(root), [])
+
+            binary = skill / "diagram.bin"
+            # ASCII の個人パスを含むが UTF-8 ではない。別エンコーディングで検索して通さない。
+            binary.write_bytes(b"\xff~/.claude")
+            with self.subTest("undecodable"):
+                self.assertEqual(
+                    personal_path_problems(root),
+                    ["skills/issue/diagram.bin: UTF-8 として読めない"],
+                )
+
+            binary.write_text("手元の ~/.claude を参照する\n", encoding="utf-8")
+            with self.subTest("text hit"):
+                self.assertEqual(
+                    personal_path_problems(root),
+                    ["skills/issue/diagram.bin: ~/.claude を含む"],
+                )
+
+            binary.write_text("参照しない\n", encoding="utf-8")
+            manifest.write_text("~/.claude\n", encoding="utf-8")
+            with self.subTest("hidden directory still scanned"):
+                self.assertEqual(
+                    personal_path_problems(root),
+                    [".claude-plugin/plugin.json: ~/.claude を含む"],
+                )
 
     def test_marketplace(self):
         d = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
